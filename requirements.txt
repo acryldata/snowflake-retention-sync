@@ -1,0 +1,2 @@
+acryl-datahub>=0.12.0
+snowflake-connector-python>=3.0.0

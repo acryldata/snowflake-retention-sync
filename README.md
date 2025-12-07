@@ -1,0 +1,244 @@
+# Snowflake Retention Period Sync to DataHub
+
+**Automatically sync Snowflake table retention periods to DataHub as custom properties.**
+
+This tool helps DataHub users identify tables with high retention periods that are not being used, enabling cost optimization and data lifecycle management. Perfect for POCs and production deployments.
+
+## 🎯 Use Case
+
+After syncing retention data to DataHub, you can:
+- **Find unused tables with long retention periods** → Delete or reduce retention to save costs
+- **Identify data lifecycle optimization opportunities** → Right-size retention based on usage
+- **Combine with DataHub usage stats** → Prioritize tables with high retention + low usage
+- **Track retention compliance** → Ensure tables meet data retention policies
+
+## 🚀 Quick Start
+
+### 1. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Configure Environment
+
+```bash
+cp config.example.env config.env
+# Edit config.env with your credentials
+source config.env
+```
+
+### 3. Run the Script
+
+```bash
+# Dry run to test (no DataHub sync)
+python snowflake_retention_sync.py --dry-run
+
+# Full sync
+python snowflake_retention_sync.py
+```
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+```bash
+# Snowflake Configuration
+SNOWFLAKE_ACCOUNT=your-account           # Required
+SNOWFLAKE_USER=service_account           # Required
+SNOWFLAKE_PASSWORD=your-password         # Required
+SNOWFLAKE_ROLE=ACCOUNTADMIN             # Optional
+SNOWFLAKE_WAREHOUSE=COMPUTE_WH          # Optional
+
+# DataHub Configuration
+DATAHUB_GMS_URL=https://your-instance.acryl.io  # Required
+DATAHUB_TOKEN=your-api-token                     # Required
+DATAHUB_ENV=PROD                                 # Optional (default: PROD)
+
+# Optional Filters
+DATABASE_FILTER=DB1,DB2,DB3             # Comma-separated database names
+SCHEMA_FILTER=PUBLIC,ANALYTICS          # Comma-separated schema names
+```
+
+### Command-Line Options
+
+```bash
+python snowflake_retention_sync.py \
+  --snowflake-account your-account \
+  --snowflake-user your-user \
+  --snowflake-password your-password \
+  --datahub-url https://your-instance.acryl.io \
+  --datahub-token your-token \
+  --database-filter "PROD_DB,ANALYTICS_DB" \
+  --dry-run \
+  --verbose
+```
+
+### Available Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--snowflake-account` | Snowflake account identifier | `$SNOWFLAKE_ACCOUNT` |
+| `--snowflake-user` | Snowflake username | `$SNOWFLAKE_USER` |
+| `--snowflake-password` | Snowflake password | `$SNOWFLAKE_PASSWORD` |
+| `--snowflake-role` | Snowflake role to use | `$SNOWFLAKE_ROLE` |
+| `--snowflake-warehouse` | Snowflake warehouse | `$SNOWFLAKE_WAREHOUSE` |
+| `--datahub-url` | DataHub GMS URL | `$DATAHUB_GMS_URL` |
+| `--datahub-token` | DataHub API token | `$DATAHUB_TOKEN` |
+| `--datahub-env` | DataHub environment | `PROD` |
+| `--database-filter` | Comma-separated database names | None (all) |
+| `--schema-filter` | Comma-separated schema names | None (all) |
+| `--dry-run` | Extract but don't sync to DataHub | False |
+| `--verbose` | Enable debug logging | False |
+
+## 📊 What Gets Synced
+
+For each Snowflake table, the following custom properties are added to DataHub:
+
+- **`retention_period_days`** - The retention period in days
+- **`retention_sync_timestamp`** - When the data was last synced
+- **`row_count`** - Number of rows (if available)
+- **`size_bytes`** - Table size in bytes (if available)
+- **`created_on`** - Table creation timestamp (if available)
+
+## 🔍 Using Retention Data in DataHub
+
+After syncing, you can search and filter in DataHub:
+
+### 1. Search by Custom Property
+
+In DataHub UI:
+- Go to Search → Advanced Filters
+- Add filter: `Custom Property = retention_period_days`
+- Filter for high retention (e.g., `> 90`)
+
+### 2. Combine with Usage Stats
+
+Find high-retention, unused tables:
+```sql
+-- In DataHub's search
+Custom Property: retention_period_days > 90
+AND Last Modified: > 6 months ago
+AND Query Count: = 0 (last 30 days)
+```
+
+### 3. Generate Reports
+
+Use DataHub's API or UI to export lists of:
+- Tables with retention > 90 days and no recent usage
+- Tables with retention > 365 days
+- Tables sorted by retention period * size
+
+## 📅 Scheduling
+
+### Cron
+
+Run daily at 2 AM:
+```bash
+0 2 * * * cd /path/to/snowflake-retention-sync && source config.env && python snowflake_retention_sync.py
+```
+
+### Airflow
+
+```python
+from airflow.operators.bash import BashOperator
+
+sync_retention = BashOperator(
+    task_id='sync_snowflake_retention',
+    bash_command='cd /path/to/script && source config.env && python snowflake_retention_sync.py',
+    dag=dag,
+)
+```
+
+### Kubernetes CronJob
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: snowflake-retention-sync
+spec:
+  schedule: "0 2 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: sync
+            image: python:3.9
+            command: ["python", "/app/snowflake_retention_sync.py"]
+            envFrom:
+            - secretRef:
+                name: snowflake-retention-secrets
+```
+
+## 🔐 Security Best Practices
+
+- **Use a dedicated service account** for Snowflake with minimal permissions
+- **Required Snowflake privileges**: `USAGE` on databases/schemas, `SELECT` on `INFORMATION_SCHEMA`
+- **Store credentials securely**: Use environment variables, secrets managers, or vault
+- **Rotate DataHub tokens regularly**
+- **Use read-only Snowflake role** if possible
+
+## 🐛 Troubleshooting
+
+### Connection Issues
+
+```bash
+# Test Snowflake connection
+python snowflake_retention_sync.py --dry-run --verbose
+```
+
+### Permission Errors
+
+Ensure your Snowflake user has:
+```sql
+GRANT USAGE ON WAREHOUSE COMPUTE_WH TO ROLE DATAHUB_ROLE;
+GRANT USAGE ON DATABASE your_database TO ROLE DATAHUB_ROLE;
+GRANT USAGE ON SCHEMA your_database.your_schema TO ROLE DATAHUB_ROLE;
+```
+
+### DataHub API Errors
+
+- Verify `DATAHUB_GMS_URL` is correct (should end in `.acryl.io` for cloud)
+- Check token permissions in DataHub UI → Settings → Access Tokens
+- Ensure token has `Edit Metadata` permission
+
+## 📝 Example Output
+
+```
+2024-03-15 14:30:00 - INFO - Connected to Snowflake account: fico-account
+2024-03-15 14:30:01 - INFO - Found 3 databases
+2024-03-15 14:30:05 - INFO - Found 245 tables in PROD_DB.PUBLIC
+2024-03-15 14:30:10 - INFO - Total tables extracted: 1,234
+2024-03-15 14:30:10 - INFO - Retention period distribution:
+2024-03-15 14:30:10 - INFO -   1 days: 450 tables
+2024-03-15 14:30:10 - INFO -   7 days: 320 tables
+2024-03-15 14:30:10 - INFO -   30 days: 180 tables
+2024-03-15 14:30:10 - INFO -   90 days: 124 tables
+2024-03-15 14:30:10 - INFO -   365 days: 160 tables
+2024-03-15 14:30:15 - INFO - Starting DataHub sync...
+2024-03-15 14:35:20 - INFO - Sync complete: 1234 succeeded, 0 failed
+2024-03-15 14:35:20 - INFO - === SYNC COMPLETE ===
+2024-03-15 14:35:20 - INFO - Total tables processed: 1234
+2024-03-15 14:35:20 - INFO - Successfully synced: 1234
+```
+
+## 🤝 Contributing
+
+Contributions welcome! Please open an issue or PR.
+
+## 📄 License
+
+MIT License - see LICENSE file for details
+
+## 💬 Support
+
+For questions or issues:
+- Open a GitHub issue
+- Contact your DataHub support team
+- Email: support@acryl.io
+
+---
+
+**Built by Acryl Data** - The company behind DataHub
