@@ -3,7 +3,10 @@
 Snowflake Retention Period Sync to DataHub
 
 This script extracts retention period data from Snowflake tables and syncs it
-to DataHub as custom properties. Designed for repeatable, scheduled execution.
+to DataHub as structured properties. Designed for repeatable, scheduled execution.
+
+IMPORTANT: Before running this script, you must create the structured property
+definition in DataHub by running: python create_retention_property.py
 
 Usage:
     python snowflake_retention_sync.py --config config.yaml
@@ -28,9 +31,8 @@ from dataclasses import dataclass
 import snowflake.connector
 from snowflake.connector.errors import ProgrammingError, DatabaseError
 from datahub.emitter.mce_builder import make_dataset_urn
-from datahub.emitter.mcp import MetadataChangeProposalWrapper
-from datahub.emitter.rest_emitter import DatahubRestEmitter
-from datahub.metadata.schema_classes import DatasetPropertiesClass
+from datahub.ingestion.graph.client import DataHubGraph, DataHubGraphConfig
+from datahub.specific.dataset import DatasetPatchBuilder
 
 # Configure logging
 logging.basicConfig(
@@ -200,16 +202,21 @@ class SnowflakeRetentionExtractor:
 
 
 class DataHubRetentionSyncer:
-    """Syncs retention data to DataHub as custom properties"""
+    """Syncs retention data to DataHub as structured properties"""
+
+    # Structured property ID (must match the property created in create_retention_property.py)
+    RETENTION_PROPERTY_ID = "io.acryl.dataManagement.retentionPeriodDays"
 
     def __init__(self, gms_url: str, token: str, env: str = "PROD"):
         self.gms_url = gms_url
         self.token = token
         self.env = env
-        self.emitter = DatahubRestEmitter(gms_server=gms_url, token=token)
+        self.graph = DataHubGraph(
+            DataHubGraphConfig(server=gms_url, token=token)
+        )
 
     def sync_table(self, table: SnowflakeTable) -> bool:
-        """Sync a single table's retention data to DataHub"""
+        """Sync a single table's retention data to DataHub as a structured property"""
         try:
             # Build dataset URN
             dataset_name = f"{table.database}.{table.schema}.{table.table}".lower()
@@ -219,33 +226,20 @@ class DataHubRetentionSyncer:
                 env=self.env
             )
 
-            # Build custom properties
-            custom_properties = {
-                "retention_period_days": str(table.retention_days),
-                "retention_sync_timestamp": datetime.now().isoformat(),
-            }
+            # Use DatasetPatchBuilder to add structured property
+            patch_builder = DatasetPatchBuilder(urn)
 
-            # Add optional metadata if available
-            if table.row_count is not None:
-                custom_properties["row_count"] = str(table.row_count)
-            if table.bytes is not None:
-                custom_properties["size_bytes"] = str(table.bytes)
-            if table.created_on:
-                custom_properties["created_on"] = table.created_on
-
-            # Create properties aspect
-            properties = DatasetPropertiesClass(
-                customProperties=custom_properties
+            # Set the structured property value (must be a number)
+            patch_builder.set_structured_property(
+                key=self.RETENTION_PROPERTY_ID,
+                value=float(table.retention_days)
             )
 
-            # Emit to DataHub
-            mcp = MetadataChangeProposalWrapper(
-                entityUrn=urn,
-                aspect=properties,
-            )
-            self.emitter.emit_mcp(mcp)
+            # Build and emit patches
+            for patch_mcp in patch_builder.build():
+                self.graph.emit(patch_mcp)
 
-            logger.debug(f"Synced retention data for {dataset_name}")
+            logger.debug(f"Synced retention data for {dataset_name} (retention: {table.retention_days} days)")
             return True
 
         except Exception as e:
@@ -266,9 +260,8 @@ class DataHubRetentionSyncer:
         return stats
 
     def close(self):
-        """Close emitter connection"""
-        if self.emitter:
-            self.emitter.close()
+        """Close graph connection"""
+        pass  # DataHubGraph doesn't need explicit close
 
 
 def main():

@@ -1,6 +1,6 @@
 # Snowflake Retention Period Sync to DataHub
 
-**Automatically sync Snowflake table retention periods to DataHub as custom properties.**
+**Automatically sync Snowflake table retention periods to DataHub as searchable structured properties.**
 
 This tool helps DataHub users identify tables with high retention periods that are not being used, enabling cost optimization and data lifecycle management. Perfect for POCs and production deployments.
 
@@ -11,16 +11,29 @@ After syncing retention data to DataHub, you can:
 - **Identify data lifecycle optimization opportunities** → Right-size retention based on usage
 - **Combine with DataHub usage stats** → Prioritize tables with high retention + low usage
 - **Track retention compliance** → Ensure tables meet data retention policies
+- **Search and filter by retention period** in DataHub UI with proper indexed properties
 
 ## 🚀 Quick Start
 
-### 1. Install Dependencies
+### 0. Create the Structured Property (One-Time Setup)
+
+**IMPORTANT:** Before syncing data, you must create the structured property definition in DataHub.
 
 ```bash
+# Install dependencies first
 pip install -r requirements.txt
+
+# Then create the property definition
+export DATAHUB_GMS_URL=https://your-instance.acryl.io
+export DATAHUB_TOKEN=your-api-token
+python create_retention_property.py
 ```
 
-### 2. Configure Environment
+This creates a searchable "Retention Period (Days)" property that will show up in DataHub's search filters.
+
+**You only need to run this once per DataHub instance.**
+
+### 1. Configure Environment
 
 ```bash
 cp config.example.env config.env
@@ -28,7 +41,7 @@ cp config.example.env config.env
 source config.env
 ```
 
-### 3. Run the Script
+### 2. Run the Sync Script
 
 ```bash
 # Dry run to test (no DataHub sync)
@@ -93,41 +106,50 @@ python snowflake_retention_sync.py \
 
 ## 📊 What Gets Synced
 
-For each Snowflake table, the following custom properties are added to DataHub:
+For each Snowflake table, the following **structured property** is added to DataHub:
 
-- **`retention_period_days`** - The retention period in days
-- **`retention_sync_timestamp`** - When the data was last synced
-- **`row_count`** - Number of rows (if available)
-- **`size_bytes`** - Table size in bytes (if available)
-- **`created_on`** - Table creation timestamp (if available)
+- **`Retention Period (Days)`** - The retention period in days (searchable and filterable in UI)
+
+This is stored as a **structured property**, which means it:
+- ✅ Shows up in dataset pages
+- ✅ Is **searchable** in DataHub UI
+- ✅ Is **filterable** in the "More" section of search
+- ✅ Is **indexed** in Elasticsearch for fast queries
+- ✅ Has proper **typing** (number, not string)
 
 ## 🔍 Using Retention Data in DataHub
 
 After syncing, you can search and filter in DataHub:
 
-### 1. Search by Custom Property
+### 1. Search by Retention Period (NEW!)
 
 In DataHub UI:
-- Go to Search → Advanced Filters
-- Add filter: `Custom Property = retention_period_days`
-- Filter for high retention (e.g., `> 90`)
+- Go to **Search** → Click **"More"** to expand filters
+- Find **"Retention Period (Days)"** in the filter list
+- Filter for high retention:
+  - `> 90` (more than 90 days)
+  - `>= 365` (1 year or more)
+  - Range filters like `30-90` days
 
 ### 2. Combine with Usage Stats
 
 Find high-retention, unused tables:
-```sql
--- In DataHub's search
-Custom Property: retention_period_days > 90
-AND Last Modified: > 6 months ago
-AND Query Count: = 0 (last 30 days)
-```
+- **Retention Period (Days)** `> 90`
+- **AND** Last Modified `> 6 months ago`
+- **AND** Query Count `= 0` (last 30 days)
 
-### 3. Generate Reports
+These tables are prime candidates for deletion or retention reduction!
+
+### 3. Sort by Retention
+
+Click the "Retention Period (Days)" column header to sort tables by retention period.
+
+### 4. Generate Reports
 
 Use DataHub's API or UI to export lists of:
 - Tables with retention > 90 days and no recent usage
 - Tables with retention > 365 days
-- Tables sorted by retention period * size
+- Tables sorted by retention period (descending)
 
 ## 📅 Scheduling
 
@@ -182,6 +204,18 @@ spec:
 
 ## 🐛 Troubleshooting
 
+### "Property not found" Error
+
+If you see errors about the structured property not existing:
+```
+Error: Property io.acryl.dataManagement.retentionPeriodDays not found
+```
+
+**Solution:** Run the property creation script first (one-time setup):
+```bash
+python create_retention_property.py
+```
+
 ### Connection Issues
 
 ```bash
@@ -204,10 +238,20 @@ GRANT USAGE ON SCHEMA your_database.your_schema TO ROLE DATAHUB_ROLE;
 - Check token permissions in DataHub UI → Settings → Access Tokens
 - Ensure token has `Edit Metadata` permission
 
+### Retention Data Not Showing in UI
+
+If retention data synced successfully but doesn't show in search filters:
+
+**Problem:** You may have used custom properties instead of structured properties.
+
+**Solution:**
+1. Run `python create_retention_property.py` to create the structured property
+2. Re-run `python snowflake_retention_sync.py` to sync data as structured properties
+
 ## 📝 Example Output
 
 ```
-2024-03-15 14:30:00 - INFO - Connected to Snowflake account: fico-account
+2024-03-15 14:30:00 - INFO - Connected to Snowflake account: your-account
 2024-03-15 14:30:01 - INFO - Found 3 databases
 2024-03-15 14:30:05 - INFO - Found 245 tables in PROD_DB.PUBLIC
 2024-03-15 14:30:10 - INFO - Total tables extracted: 1,234
