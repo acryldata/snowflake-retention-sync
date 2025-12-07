@@ -157,14 +157,42 @@ class SnowflakeRetentionExtractor:
             #                      cluster_by, rows, bytes, owner, retention_time, ...
             for row in cursor.fetchall():
                 try:
+                    # Handle retention_time - can be None, empty string, or a number
+                    retention_value = row[10] if len(row) > 10 else None  # retention_time is column 10
+                    if retention_value is None or retention_value == '':
+                        retention_days = 1
+                    else:
+                        try:
+                            retention_days = int(retention_value)
+                        except (ValueError, TypeError):
+                            retention_days = 1
+
+                    # Handle rows - can be None or empty string
+                    rows_value = row[7] if len(row) > 7 else None  # rows is column 7
+                    row_count = None
+                    if rows_value is not None and rows_value != '':
+                        try:
+                            row_count = int(rows_value)
+                        except (ValueError, TypeError):
+                            row_count = None
+
+                    # Handle bytes - can be None or empty string
+                    bytes_value = row[8] if len(row) > 8 else None  # bytes is column 8
+                    table_bytes = None
+                    if bytes_value is not None and bytes_value != '':
+                        try:
+                            table_bytes = int(bytes_value)
+                        except (ValueError, TypeError):
+                            table_bytes = None
+
                     table = SnowflakeTable(
                         database=row[2],  # database_name
                         schema=row[3],     # schema_name
                         table=row[1],      # name
-                        retention_days=int(row[5]) if row[5] is not None else 1,  # retention_time
+                        retention_days=retention_days,
                         created_on=str(row[0]) if row[0] else None,
-                        row_count=int(row[6]) if row[6] is not None else None,  # rows
-                        bytes=int(row[7]) if row[7] is not None else None,  # bytes
+                        row_count=row_count,
+                        bytes=table_bytes,
                     )
                     tables.append(table)
                 except (IndexError, ValueError) as e:
@@ -230,8 +258,10 @@ class DataHubRetentionSyncer:
             patch_builder = DatasetPatchBuilder(urn)
 
             # Set the structured property value (must be a number)
+            # Construct the full URN format for the structured property
+            retention_property_urn = f"urn:li:structuredProperty:{self.RETENTION_PROPERTY_ID}"
             patch_builder.set_structured_property(
-                key=self.RETENTION_PROPERTY_ID,
+                key=retention_property_urn,
                 value=float(table.retention_days)
             )
 
