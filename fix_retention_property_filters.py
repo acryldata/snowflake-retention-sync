@@ -30,11 +30,13 @@ logger = logging.getLogger(__name__)
 PROPERTY_ID = "io.acryl.dataManagement.retentionPeriodDays"
 PROPERTY_URN = f"urn:li:structuredProperty:{PROPERTY_ID}"
 
-DATAHUB_URL = os.getenv("DATAHUB_GMS_URL", "https://test-environment.acryl.io/gms")
+DATAHUB_URL = os.getenv("DATAHUB_GMS_URL")
 DATAHUB_TOKEN = os.getenv("DATAHUB_TOKEN")
 
-if not DATAHUB_TOKEN:
-    logger.error("❌ DATAHUB_TOKEN environment variable is required!")
+if not DATAHUB_URL or not DATAHUB_TOKEN:
+    logger.error("❌ DATAHUB_GMS_URL and DATAHUB_TOKEN environment variables are required!")
+    logger.error("   Example: export DATAHUB_GMS_URL=https://your-instance.acryl.io/gms")
+    logger.error("   Example: export DATAHUB_TOKEN=your-api-token")
     sys.exit(1)
 
 logger.info(f"Connecting to DataHub: {DATAHUB_URL}")
