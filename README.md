@@ -29,9 +29,18 @@ export DATAHUB_TOKEN=your-api-token
 python create_retention_property.py
 ```
 
-This creates a searchable "Retention Period (Days)" property that will show up in DataHub's search filters.
+This creates a **searchable** "Retention Period (Days)" property that will show up in DataHub's search filters under "More".
+
+**The script now correctly configures BOTH required aspects:**
+1. ✅ `StructuredPropertyDefinition` - Defines the property metadata, types, etc.
+2. ✅ `StructuredPropertySettings` with `showInSearchFilters=true` - Makes it appear in search filters!
 
 **You only need to run this once per DataHub instance.**
+
+**⚠️ If you already created the property before this fix and it's not showing in search filters, run:**
+```bash
+python fix_retention_property_filters.py
+```
 
 ### 1. Configure Environment
 
@@ -238,15 +247,41 @@ GRANT USAGE ON SCHEMA your_database.your_schema TO ROLE DATAHUB_ROLE;
 - Check token permissions in DataHub UI → Settings → Access Tokens
 - Ensure token has `Edit Metadata` permission
 
-### Retention Data Not Showing in UI
+### Retention Data Not Showing in Search Filters
 
-If retention data synced successfully but doesn't show in search filters:
+If retention data synced successfully but **doesn't show up in the "More" search filters**:
 
-**Problem:** You may have used custom properties instead of structured properties.
+**Problem:** The `StructuredPropertySettings` aspect with `showInSearchFilters=True` is missing.
+
+**Root Cause:** DataHub requires TWO aspects for searchable structured properties:
+1. `StructuredPropertyDefinition` aspect (property metadata, types, etc.)
+2. `StructuredPropertySettings` aspect with `showInSearchFilters=True` ← **This is what makes it filterable!**
 
 **Solution:**
-1. Run `python create_retention_property.py` to create the structured property
-2. Re-run `python snowflake_retention_sync.py` to sync data as structured properties
+
+**Option 1: Run the Fix Script (Fastest)** ✅
+```bash
+python fix_retention_property_filters.py
+```
+This script adds the missing `StructuredPropertySettings` aspect to your existing property.
+
+**Option 2: Re-create the Property from Scratch**
+```bash
+# Delete the old property in DataHub UI (Settings → Structured Properties)
+# Then run the updated creation script
+python create_retention_property.py
+```
+
+**After Running the Fix:**
+1. Re-sync all datasets: `python snowflake_retention_sync.py`
+2. Wait 5-10 minutes for Elasticsearch to reindex
+3. Hard refresh browser: `Cmd+Shift+R` (Mac) or `Ctrl+Shift+R` (Windows/Linux)
+4. Check DataHub search UI → The property should now appear in "More" filters!
+
+**Why This Happens:**
+- The `searchConfiguration.addToFilters` flag in the property definition is NOT enough
+- You must ALSO set the `StructuredPropertySettings.showInSearchFilters = true`
+- The fixed `create_retention_property.py` script now correctly sets both aspects
 
 ## 📝 Example Output
 
